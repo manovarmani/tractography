@@ -8,6 +8,7 @@ from scipy.spatial.distance import pdist, squareform
 from sklearn.manifold import MDS
 from scipy.cluster.hierarchy import dendrogram, linkage
 from skbio.stats.ordination import pcoa
+import phate
 
 class color:
     # ANSI escape codes for various colors
@@ -60,8 +61,22 @@ def get_com(nifti, **kwargs):
     return centroids
 
 
-def visualize():
-    num_slices = mri_img_data.shape[2]
+def visualize(axis='z'):
+    """
+    visualize MRI mosaic along a specified axis (axis = x, y, or z)
+    """
+    if axis == 'x':
+        print('visualizing x axis')
+        num_slices = mri_img_data.shape[0]
+        slice_selection = lambda i: mri_img_data[i, :, :]
+    elif axis == 'y':
+        print('visualizing y axis')
+        num_slices = mri_img_data.shape[1]
+        slice_selection = lambda i: mri_img_data[:, i, :]
+    else:
+        color.cprint('no axis specified, defaulting to z axis', 'yellow')
+        num_slices = mri_img_data.shape[2]
+        slice_selection = lambda i: mri_img_data[:, :, i]
 
     grid_size = int(np.ceil(np.sqrt(num_slices)))
 
@@ -70,7 +85,7 @@ def visualize():
 
     for i in range(num_slices):
         ax = axes[i]
-        ax.imshow(mri_img_data[:, :, i], cmap='gray')
+        ax.imshow(slice_selection(i), cmap='inferno')
         ax.set_title(f'Slice {i}')
         ax.axis('off')
 
@@ -144,6 +159,32 @@ def plot_heatmap(dist_matrix, labels=None):
     plt.figure(figsize=(15, 10))
     sns.heatmap(dist_matrix, annot=False, fmt=".2f", cmap='coolwarm', cbar_kws={'label': 'Distance'})
     plt.title('Heat Map of Distance Matrix')
-    plt.xlabel('Labels')
-    plt.ylabel('Labels')
     plt.show()
+
+def get_phate(dist_matrix):
+
+    dist_matrix_copy = dist_matrix.copy()
+    n_neighbors = 25
+    #gamma=1
+    #t=10
+
+    phate_operator = phate.PHATE(n_components = 3, knn = n_neighbors, n_jobs=-1)
+    #phate_operator = phate.PHATE(n_components = 2, knn = n_neighbors, gamma=gamma, t=t, a=decay)
+    ph_res_3d = phate_operator.fit_transform(dist_matrix_copy)
+    ph_res_3d = pd.DataFrame(ph_res_3d, index = dist_matrix_copy.index)
+    ph_res_3d = ph_res_3d.rename(columns={0: "x", 1: "y"})
+
+    dist_matrix_copy["PHATE_1"] = ph_res_3d.x
+    dist_matrix_copy["PHATE_2"] = ph_res_3d.y
+
+    plt.figure(figsize=(8, 6))
+    plt.scatter(ph_res_3d['x'], ph_res_3d['y'], c='blue', marker='o', alpha=0.5)
+    plt.xlabel('PHATE 1')
+    plt.ylabel('PHATE 2')
+    plt.title('2D Scatter Plot of PHATE Coordinates')
+    plt.grid(True)
+    plt.show()
+
+
+def compare():
+    pass
