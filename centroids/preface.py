@@ -185,6 +185,41 @@ def get_phate(dist_matrix):
     plt.grid(True)
     plt.show()
 
+def centroid_nifti(centroids, original_image_path, output_image_path, block_size=2):
+    """
+    Create a new nifti image with centroids marked
+
+    *PARAMETERS*
+    centroids: dictionary of centroids
+    original_image_path: path to the original nifti image
+    output_image_path: path to the output nifti image
+    block_size: size of the block around the centroid to be marked
+    """
+    
+    #later see if should check if mri_img_data is None and load it
+    original_img = nib.load(original_image_path)
+    original_data = original_img.get_fdata()
+
+    label_data = np.zeros_like(original_data)
+
+    label = 1001
+
+    half_block = block_size // 2
+
+    for centroid in centroids.values():
+        x, y, z = map(int, centroid)
+        for dx in range(-half_block, half_block + 1):
+            for dy in range(-half_block, half_block + 1):
+                for dz in range(-half_block, half_block + 1):
+                    nx, ny, nz = x + dx, y + dy, z + dz
+                    if 0 <= nx < label_data.shape[0] and 0 <= ny < label_data.shape[1] and 0 <= nz < label_data.shape[2]:
+                        label_data[nx, ny, nz] = label
+        label += 1
+
+    new_img = nib.Nifti1Image(label_data, original_img.affine, original_img.header)
+    
+    nib.save(new_img, output_image_path)
+
 
 def compare():
     pass
