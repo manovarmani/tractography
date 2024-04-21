@@ -36,12 +36,14 @@ def get_com(nifti, **kwargs):
     mri_img: nibabel image object
     mri_img_txt: precise names of each labels (optional)
     """
-    global mri_img_data
+    global img
     img = nib.load(nifti)
+    global mri_img_data
     mri_img_data = img.get_fdata()
 
     unique_labels = np.unique(mri_img_data)
     unique_labels = unique_labels[unique_labels != 0] #eliminate background
+    global centroids
     centroids = {}
     for i, label in enumerate(unique_labels):
         mask = (mri_img_data == label)
@@ -50,6 +52,7 @@ def get_com(nifti, **kwargs):
 
     if 'txt' in kwargs:
         with open(kwargs['txt'], 'r') as file:
+            global labelnames
             labelnames = [line.strip().replace('\t', ' ') for line in file.readlines()]
             
         if len(labelnames) == len(centroids):
@@ -61,10 +64,15 @@ def get_com(nifti, **kwargs):
     return centroids
 
 
-def visualize(axis='z'):
+def visualize(axis):
     """
     visualize MRI mosaic along a specified axis (axis = x, y, or z)
     """
+    try:
+        mri_img_data
+    except NameError:
+        color.cprint('MRI data not loaded. Please run get_com() first.', 'red')
+        return
     if axis == 'x':
         print('visualizing x axis')
         num_slices = mri_img_data.shape[0]
@@ -73,10 +81,13 @@ def visualize(axis='z'):
         print('visualizing y axis')
         num_slices = mri_img_data.shape[1]
         slice_selection = lambda i: mri_img_data[:, i, :]
-    else:
-        color.cprint('no axis specified, defaulting to z axis', 'yellow')
+    elif axis == 'z':
+        print('visualizing z axis')
         num_slices = mri_img_data.shape[2]
         slice_selection = lambda i: mri_img_data[:, :, i]
+    else:
+        color.cprint('Invalid axis. Please enter x, y, or z.', 'red')
+        return
 
     grid_size = int(np.ceil(np.sqrt(num_slices)))
 
@@ -105,7 +116,6 @@ def get_distance_matrix(centroids):
     dist_matrix = squareform(pdist(coords), 'euclidean')
 
     return pd.DataFrame(dist_matrix, index=labels, columns=labels)
-
 
 def perform_mds(dist_matrix):
     """
@@ -185,6 +195,64 @@ def get_phate(dist_matrix):
     plt.grid(True)
     plt.show()
 
+def mark_centroids(output_nifti_path, output_label_file, output_color_file, block_size=2):
+    """
+    Marks centroids on an MRI image with a visible block around each centroid for better visualization,
+    while preserving the original image labels. The block size defines the radius of the block around
+    the centroid in voxels.
+
+    Parameters:
+    nifti_path: Path to the original NIfTI file.
+    labelnames: List of region names corresponding to labels in the MRI data.
+    output_nifti_path: Path to save the modified NIfTI file.
+    output_label_file: Path to save the new labels.
+    output_color_file: Path to save the color codes.
+    block_size: Determines the size of the marked block around each centroid (default 3).
+    """
+
+    updated_labels = []
+    color_map = {}
+    base_intensity = mri_img_data.max() + 1  # Ensure a unique intensity value that stands out
+
+    # Color assignments
+    centroid_color = (255, 255, 0, 255)  # Bright yellow for centroids
+    region_colors = [
+        (113, 126, 244, 90), (244, 113, 244, 90), (244, 126, 113, 90), (218, 244, 113, 90),
+        (113, 244, 153, 90), (113, 192, 244, 90), (179, 113, 244, 90), (244, 113, 166, 90)
+    ]  # RGBA values for regions with reduced opacity
+
+    for i, label in enumerate(labelnames):
+        region_mask = mri_img_data == (i + 1)  # Assuming label indices start at 1 in MRI data
+        if np.any(region_mask):
+            centroid = np.round(np.mean(np.argwhere(region_mask), axis=0)).astype(int)
+            x, y, z = centroid
+
+            new_label = f'{label}_CTX'
+            updated_labels.append(new_label)
+            color_map[new_label] = centroid_color
+            color_map[label] = region_colors[i % len(region_colors)]
+
+            # Mark a block around the centroid with high intensity to ensure visibility
+            for dx in range(-block_size, block_size + 1):
+                for dy in range(-block_size, block_size + 1):
+                    for dz in range(-block_size, block_size + 1):
+                        nx, ny, nz = x + dx, y + dy, z + dz
+                        if 0 <= nx < mri_img_data.shape[0] and 0 <= ny < mri_img_data.shape[1] and 0 <= nz < mri_img_data.shape[2]:
+                            mri_img_data[nx, ny, nz] = base_intensity  # Use base_intensity for clarity
+
+    new_img = nib.Nifti1Image(mri_img_data, img.affine, img.header)
+    nib.save(new_img, output_nifti_path)
+
+    # Save new labels and color codes
+    with open(output_label_file, 'w') as f:
+        for label in updated_labels:
+            f.write(f"{label}\n")
+
+    with open(output_color_file, 'w') as f:
+        for label, color in color_map.items():
+            f.write(f"{label}: {color[0]} {color[1]} {color[2]} {color[3]}\n")
+
+'''
 def centroid_nifti(centroids, original_image_path, output_image_path, block_size=2):
     """
     Create a new nifti image with centroids marked
@@ -219,7 +287,7 @@ def centroid_nifti(centroids, original_image_path, output_image_path, block_size
     new_img = nib.Nifti1Image(label_data, original_img.affine, original_img.header)
     
     nib.save(new_img, output_image_path)
-
+'''
 
 def compare():
     pass
