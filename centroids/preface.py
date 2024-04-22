@@ -30,36 +30,41 @@ class color:
 
 def get_com(nifti, **kwargs):
     """
-    get the center of mass of a 3D image
+    Calculate the center of mass for each labeled region in a 3D image without modifying the original data.
 
     PARAMETERS
-    mri_img: nibabel image object
-    mri_img_txt: precise names of each labels (optional)
+    nifti: path to nibabel image object
+    mri_img_txt: file path for precise names of each label (optional)
     """
-    global img
+    # Load the image and ensure data is treated as integers
+    global img, mri_img_data, labelnames
     img = nib.load(nifti)
-    global mri_img_data
     mri_img_data = img.get_fdata()
+    mri_img_data = np.round(mri_img_data).astype(int)  # Round and convert to int to ensure label integrity
 
+    # Find all unique labels excluding the background (0)
     unique_labels = np.unique(mri_img_data)
-    unique_labels = unique_labels[unique_labels != 0] #eliminate background
-    global centroids
+    unique_labels = unique_labels[unique_labels != 0]
+    
     centroids = {}
-    for i, label in enumerate(unique_labels):
+    for label in unique_labels:
         mask = (mri_img_data == label)
         centroid = center_of_mass(mask)
-        centroids[label] = centroid
+        centroids[label] = tuple(centroid)  # Store centroids as tuples
 
+    # Handle optional text file for label names
     if 'txt' in kwargs:
-        with open(kwargs['txt'], 'r') as file:
-            global labelnames
-            labelnames = [line.strip().replace('\t', ' ') for line in file.readlines()]
-            
-        if len(labelnames) == len(centroids):
-            new_centroids = {labelnames[i]: centroid for i, (key, centroid) in enumerate(centroids.items())}
-            centroids = new_centroids
-        else:
-            color.cprint("ERR: # of labels in the TXT file does not match # of unique labels. Ignoring TXT file.", 'red')
+        try:
+            with open(kwargs['txt'], 'r') as file:
+                labelnames = [line.strip().replace('\t', ' ') for line in file.readlines()]
+                if len(labelnames) == len(centroids):
+                    # Map labels to names if counts match
+                    new_centroids = {labelnames[i]: centroids[key] for i, key in enumerate(sorted(centroids.keys()))}
+                    centroids = new_centroids
+                else:
+                    print("ERROR: # of labels in the TXT file does not match # of unique labels. Ignoring TXT file.")
+        except Exception as e:
+            print(f"Error reading text file: {e}")
 
     return centroids
 
@@ -195,99 +200,49 @@ def get_phate(dist_matrix):
     plt.grid(True)
     plt.show()
 
-def mark_centroids(output_nifti_path, output_label_file, output_color_file, block_size=2):
+def mark_centroids(output_nifti_path, output_label_file, output_color_file, block_size=1):
     """
-    Marks centroids on an MRI image with a visible block around each centroid for better visualization,
-    while preserving the original image labels. The block size defines the radius of the block around
-    the centroid in voxels.
+    Marks centroids on an MRI image with a visible block around each centroid for better visualization
 
     Parameters:
-    nifti_path: Path to the original NIfTI file.
-    labelnames: List of region names corresponding to labels in the MRI data.
     output_nifti_path: Path to save the modified NIfTI file.
-    output_label_file: Path to save the new labels.
-    output_color_file: Path to save the color codes.
-    block_size: Determines the size of the marked block around each centroid (default 3).
+    output_label_file: Path to save new labels.
+    output_color_file: Path to save color codes.
+    block_size: Determines the size of the marked block around each centroid (default 1).
     """
-
     updated_labels = []
     color_map = {}
-    base_intensity = mri_img_data.max() + 1  # Ensure a unique intensity value that stands out
-
-    # Color assignments
-    centroid_color = (255, 255, 0, 255)  # Bright yellow for centroids
-    region_colors = [
-        (113, 126, 244, 90), (244, 113, 244, 90), (244, 126, 113, 90), (218, 244, 113, 90),
-        (113, 244, 153, 90), (113, 192, 244, 90), (179, 113, 244, 90), (244, 113, 166, 90)
-    ]  # RGBA values for regions with reduced opacity
+    white_intensity = 255 
 
     for i, label in enumerate(labelnames):
-        region_mask = mri_img_data == (i + 1)  # Assuming label indices start at 1 in MRI data
+        region_mask = mri_img_data == (i + 1)
         if np.any(region_mask):
             centroid = np.round(np.mean(np.argwhere(region_mask), axis=0)).astype(int)
             x, y, z = centroid
 
             new_label = f'{label}_CTX'
             updated_labels.append(new_label)
-            color_map[new_label] = centroid_color
-            color_map[label] = region_colors[i % len(region_colors)]
+            color = np.random.randint(0, 256, size=3)
+            color_map[new_label] = color
 
-            # Mark a block around the centroid with high intensity to ensure visibility
             for dx in range(-block_size, block_size + 1):
                 for dy in range(-block_size, block_size + 1):
                     for dz in range(-block_size, block_size + 1):
                         nx, ny, nz = x + dx, y + dy, z + dz
                         if 0 <= nx < mri_img_data.shape[0] and 0 <= ny < mri_img_data.shape[1] and 0 <= nz < mri_img_data.shape[2]:
-                            mri_img_data[nx, ny, nz] = base_intensity  # Use base_intensity for clarity
+                            mri_img_data[nx, ny, nz] = white_intensity
 
     new_img = nib.Nifti1Image(mri_img_data, img.affine, img.header)
     nib.save(new_img, output_nifti_path)
 
-    # Save new labels and color codes
     with open(output_label_file, 'w') as f:
         for label in updated_labels:
             f.write(f"{label}\n")
 
     with open(output_color_file, 'w') as f:
         for label, color in color_map.items():
-            f.write(f"{label}: {color[0]} {color[1]} {color[2]} {color[3]}\n")
-
-'''
-def centroid_nifti(centroids, original_image_path, output_image_path, block_size=2):
-    """
-    Create a new nifti image with centroids marked
-
-    *PARAMETERS*
-    centroids: dictionary of centroids
-    original_image_path: path to the original nifti image
-    output_image_path: path to the output nifti image
-    block_size: size of the block around the centroid to be marked
-    """
-    
-    #later see if should check if mri_img_data is None and load it
-    original_img = nib.load(original_image_path)
-    original_data = original_img.get_fdata()
-
-    label_data = np.zeros_like(original_data)
-
-    label = 1001
-
-    half_block = block_size // 2
-
-    for centroid in centroids.values():
-        x, y, z = map(int, centroid)
-        for dx in range(-half_block, half_block + 1):
-            for dy in range(-half_block, half_block + 1):
-                for dz in range(-half_block, half_block + 1):
-                    nx, ny, nz = x + dx, y + dy, z + dz
-                    if 0 <= nx < label_data.shape[0] and 0 <= ny < label_data.shape[1] and 0 <= nz < label_data.shape[2]:
-                        label_data[nx, ny, nz] = label
-        label += 1
-
-    new_img = nib.Nifti1Image(label_data, original_img.affine, original_img.header)
-    
-    nib.save(new_img, output_image_path)
-'''
+            f.write(f"{color[0]} {color[1]} {color[2]} 100\n")
+        f.write("255 255 255 255\n")
 
 def compare():
     pass
