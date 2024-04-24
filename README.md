@@ -1,5 +1,5 @@
 
-![pittneurosurgery-simple](https://github.com/manovarmani/tractography/assets/142830163/c6111043-0350-4a13-909d-0d605f69563c)
+![pittneurosurgerytest](https://github.com/manovarmani/tractography/assets/142830163/c256993d-4cb3-4f3d-a0a0-afa9594a5001)
 
 
 # Fiber Tractography Repository
